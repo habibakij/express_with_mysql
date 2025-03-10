@@ -1,65 +1,100 @@
-const express = require('express');
-const dbConnection = require('./db_connection');
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const dbConnection = require("./db_connection");
 
 const app = express();
 const port = 3000;
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// Configure multer to store images in 'uploads' folder with original file extension
+const storage = multer.diskStorage({
+  destination: "uploads/",
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + path.extname(file.originalname);
+    cb(null, file.fieldname + "-" + uniqueSuffix);
+  },
+});
+const upload = multer({ storage });
 
 // Logging middleware
 app.use((req, res, next) => {
-    console.log("[${new Date().toISOString()}] ${req.method} ${req.url}");
-    next();
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
 });
 
 // Test db Connection
-dbConnection.query('SELECT 1')
-    .then(() => console.log("MySQL Connected"))
-    .catch((err) => console.error("MySQL Connection Error:", err));
+dbConnection
+  .query("SELECT 1")
+  .then(() => console.log("MySQL Connected"))
+  .catch((err) => console.error("MySQL Connection Error:", err));
 
-// fetch new place get request
-app.get('/new_place', async (req, res) => {
+// Fetch new place GET request
+app.get("/new_place", async (req, res, next) => {
+  try {
+    const [rows] = await dbConnection.query("SELECT * FROM new_place");
+    res.status(200).json({
+      status: "Success",
+      message: "Data fetched successfully",
+      data: rows,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Add new place POST request
+app.post(
+  "/add_new_place",
+  upload.single("placeImage"),
+  async (req, res, next) => {
     try {
-        const [rows] = await dbConnection.query('SELECT * FROM new_place');
-        res.status(200).json({
-          status: 'Success',
-          message: 'Data fetch successfully',
-          data: rows
+      const { placeTitle, placeDes } = req.body;
+
+      if (!placeTitle || !placeDes || !req.file) {
+        return res.status(400).json({
+          status: "error",
+          message: "Missing required fields",
+        });
+      }
+
+      const placeImage = `${req.protocol}://${req.get("host")}/uploads/${
+        req.file.filename
+      }`;
+
+      const [result] = await dbConnection.query(
+        "INSERT INTO new_place (placeTitle, placeDes, placeImage) VALUES (?, ?, ?)",
+        [placeTitle, placeDes, placeImage]
+      );
+
+      res.status(201).json({
+        status: "Success",
+        message: "Data added successfully",
+        data: { id: result.insertId, placeTitle, placeDes, placeImage },
       });
-        res.json(rows);
     } catch (error) {
       next(error);
     }
-});
-
-// add new place post request
-app.post('/add_new_place', async (req, res) => {
-    try {
-        const {placeTitle, placeDes, placeImage} = req.body;
-        const [result] = await dbConnection.query('INSERT INTO new_place (placeTitle, placeDes, placeImage) VALUES (?, ?, ?)', [placeTitle, placeDes, placeImage]);
-        res.status(200).json({
-          status: 'Success',
-          message: 'Data added successfully',
-          data: { id: result.insertId, placeTitle, placeDes, placeImage}
-      });
-    } catch (error) {
-        next(error);
-    }
-});
-
+  }
+);
 
 // 404 Middleware
 app.use((req, res, next) => {
-    res.status(404).json({ error: "Route not found"});
+  res.status(404).json({ error: "Route not found" });
 });
 
-// Global Middleware
+// Global Error Handling Middleware
 app.use((err, req, res, next) => {
-    console.error("Error: ${err.message}");
-    res.status(500).json({ error: "Internal Server Error", message: err.message });
+  console.error(`Error: ${err.message}`);
+  res
+    .status(500)
+    .json({ error: "Internal Server Error", message: err.message });
 });
 
 // Start the server
 app.listen(port, () => {
-    console.log("Server is running on http://localhost:${port}");
+  console.log(`Server is running on http://localhost:${port}`);
 });
