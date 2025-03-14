@@ -32,6 +32,27 @@ dbConnection
   .then(() => console.log("MySQL Connected"))
   .catch((err) => console.error("MySQL Connection Error:", err));
 
+// Fetch profile GET request
+app.get("/profile", async (req, res, next) => {
+  try {
+    const [rows] = await dbConnection.query("SELECT * FROM user_profile");
+    rows.forEach((row) => {
+      try {
+        row.photo = JSON.parse(row.photo);
+      } catch (error) {
+        console.error("JSON Parse Error for photo:", error.message);
+      }
+    });
+    res.status(200).json({
+      status: "Success",
+      message: "Data fetched successfully",
+      data: rows,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Fetch new place GET request
 app.get("/new_place", async (req, res, next) => {
   try {
@@ -53,14 +74,60 @@ app.get("/new_place", async (req, res, next) => {
   }
 });
 
+/// user profile update post request
+app.post("/profile_update", upload.single("photo"), async (req, res, next) => {
+  try {
+    const { name, phone, email, nationality } = req.body;
+
+    if (!name || !phone) {
+      return res.status(400).json({
+        status: "error",
+        message: `Missing required fields. Please check ${name} or ${phone}`,
+      });
+    }
+
+    let photo = "";
+    if (req.file) {
+      photo = `${req.protocol}://${req.get("host")}/uploads/${
+        req.file.filename
+      }`;
+    }
+
+    const [result] = await dbConnection.query(
+      "INSERT INTO user_profile (name, phone, email, nationality, photo) VALUES (?, ?, ?, ?, ?)",
+      [name, phone, email, nationality, JSON.stringify(photo)]
+    );
+    res.status(200).json({
+      status: "Success",
+      message: "Data added successfully",
+      data: {
+        id: result.insertId,
+        name,
+        phone,
+        email,
+        nationality,
+        photo,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Add new place POST request
 app.post(
   "/add_new_place",
   upload.array("placeImage", 5),
   async (req, res, next) => {
     try {
-      const { placeTitle, placeDes } = req.body;
-      if (!placeTitle || !placeDes || !req.files || req.files.length === 0) {
+      const { placeTitle, placeLocation, placeDes } = req.body;
+      if (
+        !placeTitle ||
+        !placeLocation ||
+        !placeDes ||
+        !req.files ||
+        req.files.length === 0
+      ) {
         return res.status(400).json({
           status: "error",
           message: "Missing required fields",
@@ -71,13 +138,19 @@ app.post(
           `${req.protocol}://${req.get("host")}/uploads/${file.filename}`
       );
       const [result] = await dbConnection.query(
-        "INSERT INTO new_place (placeTitle, placeDes, placeImage) VALUES (?, ?, ?)",
-        [placeTitle, placeDes, JSON.stringify(placeImage)]
+        "INSERT INTO new_place (placeTitle, placeDes, placeImage, placeLocation) VALUES (?, ?, ?, ?)",
+        [placeTitle, placeDes, JSON.stringify(placeImage), placeLocation]
       );
       res.status(201).json({
         status: "Success",
         message: "Data added successfully",
-        data: { id: result.insertId, placeTitle, placeDes, placeImage },
+        data: {
+          id: result.insertId,
+          placeTitle,
+          placeLocation,
+          placeDes,
+          placeImage,
+        },
       });
     } catch (error) {
       next(error);
